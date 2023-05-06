@@ -1,0 +1,13 @@
+apiVersion: batch.alongparty.cn/v1
+kind: MysqlCluster
+metadata:
+  labels:
+    app.kubernetes.io/name: mysqlcluster
+    app.kubernetes.io/instance: mysqlcluster-sample
+    app.kubernetes.io/part-of: mysql-operator
+    app.kuberentes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: mysql-operator
+  name: mysqlcluster-sample
+spec:
+  image: mysql:5.7
+  replicas: 2

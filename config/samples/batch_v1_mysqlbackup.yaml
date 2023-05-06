@@ -1,0 +1,12 @@
+apiVersion: batch.alongparty.cn/v1
+kind: MysqlBackUp
+metadata:
+  labels:
+    app.kubernetes.io/name: mysqlbackup
+    app.kubernetes.io/instance: mysqlbackup-sample
+    app.kubernetes.io/part-of: mysql-operator
+    app.kuberentes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: mysql-operator
+  name: mysqlbackup-sample
+spec:
+  # TODO(user): Add fields here

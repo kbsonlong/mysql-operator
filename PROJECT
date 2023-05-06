@@ -1,0 +1,34 @@
+domain: alongparty.cn
+layout:
+- go.kubebuilder.io/v3
+projectName: mysql-operator
+repo: github.com/kbsonlong/mysql-operator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: alongparty.cn
+  group: batch
+  kind: MysqlCluster
+  path: github.com/kbsonlong/mysql-operator/api/v1
+  version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: alongparty.cn
+  group: batch
+  kind: MysqlBackUp
+  path: github.com/kbsonlong/mysql-operator/api/v1
+  version: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: alongparty.cn
+  group: batch
+  kind: MysqlRestore
+  path: github.com/kbsonlong/mysql-operator/api/v1
+  version: v1
+version: "3"

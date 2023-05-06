@@ -1,0 +1,72 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.9.2
+  creationTimestamp: null
+  name: mysqlclusters.batch.alongparty.cn
+spec:
+  group: batch.alongparty.cn
+  names:
+    kind: MysqlCluster
+    listKind: MysqlClusterList
+    plural: mysqlclusters
+    singular: mysqlcluster
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.Replicas
+      name: Replicas
+      type: integer
+    name: v1
+    schema:
+      openAPIV3Schema:
+        description: MysqlCluster is the Schema for the mysqlclusters API
+        properties:
+          apiVersion:
+            description: 'APIVersion defines the versioned schema of this representation
+              of an object. Servers should convert recognized schemas to the latest
+              internal value, and may reject unrecognized values. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources'
+            type: string
+          kind:
+            description: 'Kind is a string value representing the REST resource this
+              object represents. Servers may infer this from the endpoint the client
+              submits requests to. Cannot be updated. In CamelCase. More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds'
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: MysqlClusterSpec defines the desired state of MysqlCluster
+            properties:
+              image:
+                type: string
+              mysqlVersion:
+                default: "5.7"
+                description: 'Represents the MySQL version that will be run. The available
+                  version can be found here: This field should be set even if the
+                  Image is set to let the operator know which mysql version is running.
+                  Based on this version the operator can take decisions which features
+                  can be used. 默认版本  5.7'
+                type: string
+              replicas:
+                description: The number of pods. This updates replicas filed Defaults
+                  to 0
+                format: int32
+                type: integer
+            type: object
+          status:
+            description: MysqlClusterStatus defines the observed state of MysqlCluster
+            properties:
+              replicas:
+                description: 'INSERT ADDITIONAL STATUS FIELD - define observed state
+                  of cluster Important: Run "make" to regenerate code after modifying
+                  this file'
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
