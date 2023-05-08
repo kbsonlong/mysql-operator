@@ -12,6 +12,8 @@ spec:
     kind: MysqlCluster
     listKind: MysqlClusterList
     plural: mysqlclusters
+    shortNames:
+    - msc
     singular: mysqlcluster
   scope: Namespaced
   versions:
@@ -22,6 +24,12 @@ spec:
       type: string
     - jsonPath: .status.replica
       name: Replica
+      type: integer
+    - jsonPath: .metadata.creationTimestamp
+      name: AGE
+      type: date
+    - jsonPath: .status.lastScheduleTime
+      name: LastScheduleTime
       type: integer
     name: v1
     schema:
@@ -62,10 +70,16 @@ spec:
           status:
             description: MysqlClusterStatus defines the observed state of MysqlCluster
             properties:
+              lastScheduleTime:
+                description: LastScheduleTime metav1.Time `json:"lastScheduleTime,omitempty"
+                  protobuf:"bytes,8,opt,name=lastScheduleTime"`
+                format: int32
+                type: integer
               replica:
                 format: int32
                 type: integer
             required:
+            - lastScheduleTime
             - replica
             type: object
         type: object

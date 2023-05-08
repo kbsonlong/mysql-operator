@@ -9,6 +9,9 @@
             "type": "go",
             "request": "launch",
             "mode": "auto",
+            "env": {
+                "GOWORK": "off",
+            },
             "program": "main.go"
         }
     ]

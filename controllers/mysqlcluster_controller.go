@@ -19,6 +19,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -31,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	batchv1 "github.com/kbsonlong/mysql-operator/api/v1"
+	"github.com/kbsonlong/mysql-operator/pkg/sql"
 	apps "k8s.io/api/apps/v1"
 	k8scorev1 "k8s.io/api/core/v1"
 )
@@ -79,8 +81,12 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 			log.Info("update mysqlcluster state")
 			fmt.Println(*cluster.Spec.Replicas)
 			cluster.Status.Replica = *cluster.Spec.Replicas
+			time_now := time.Now().Nanosecond()
+			fmt.Println(int32(time_now))
+			cluster.Status.LastScheduleTime = int32(time_now)
 			// 必须使用 r.Status().Update() 更新，否则不会展示 Status 字段
 			err = r.Status().Update(ctx, cluster)
+
 			if err != nil {
 				r.Recorder.Event(cluster, k8scorev1.EventTypeWarning, "FailedUpdateStatus", err.Error())
 				return ctrl.Result{}, err
@@ -92,6 +98,10 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// TODO(user): 初始化 MySQL 主从集群
 	// _ = r.InitMysqlCluster(ctx, cluster)
+	dsn := sql.GetDsn(map[string]interface{}{"user_name": "root", "password": "123456", "host": fmt.Sprintf("%s-0", cluster.Name)})
+	fmt.Println(dsn)
+	db := sql.DbConnect(dsn)
+	fmt.Println(db.Stats().OpenConnections)
 
 	pod := &k8scorev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -239,6 +249,14 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 			Type:      k8scorev1.ServiceTypeClusterIP,
 			ClusterIP: "None",
 		},
+	}
+
+	// service 与 crd 资源建立关联,
+	// 建立关联后，删除 crd 资源时就会将 service 也删除掉
+	log.Info("set reference")
+	if err := controllerutil.SetControllerReference(cluster, headlessService, r.Scheme); err != nil {
+		log.Error(err, "SetControllerReference error")
+		return err
 	}
 
 	log.Info("start create headlessService")

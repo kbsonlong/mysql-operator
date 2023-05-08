@@ -2,7 +2,7 @@
  * @Author: kbsonlong kbsonlong@gmail.com
  * @Date: 2023-05-06 16:09:35
  * @LastEditors: kbsonlong kbsonlong@gmail.com
- * @LastEditTime: 2023-05-08 14:00:06
+ * @LastEditTime: 2023-05-08 21:38:20
  * @FilePath: /mysql-operator/Users/zengshenglong/Code/GoWorkSpace/operators/mysql-operator/api/v1/mysqlcluster_types.go
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -58,11 +58,16 @@ type MysqlClusterStatus struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	Replica int32 `json:"replica"`
+	// LastScheduleTime metav1.Time `json:"lastScheduleTime,omitempty" protobuf:"bytes,8,opt,name=lastScheduleTime"`
+	LastScheduleTime int32 `json:"lastScheduleTime"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:printcolumn:name="Image",type="string",JSONPath=".spec.image",description="The Docker Image of MyAPP"
 // +kubebuilder:printcolumn:JSONPath=".status.replica",name=Replica,type=integer
+// +kubebuilder:printcolumn:name="AGE",type="date",JSONPath=".metadata.creationTimestamp"
+// +kubebuilder:printcolumn:name="LastScheduleTime",type="integer",JSONPath=".status.lastScheduleTime"
+// +kubebuilder:resource:shortName=msc
 // +kubebuilder:subresource:status
 
 // MysqlCluster is the Schema for the mysqlclusters API
