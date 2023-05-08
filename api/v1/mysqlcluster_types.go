@@ -1,4 +1,12 @@
 /*
+ * @Author: kbsonlong kbsonlong@gmail.com
+ * @Date: 2023-05-06 16:09:35
+ * @LastEditors: kbsonlong kbsonlong@gmail.com
+ * @LastEditTime: 2023-05-08 14:00:06
+ * @FilePath: /mysql-operator/Users/zengshenglong/Code/GoWorkSpace/operators/mysql-operator/api/v1/mysqlcluster_types.go
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+ */
+/*
 Copyright 2023.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -48,12 +56,14 @@ type MysqlClusterSpec struct {
 type MysqlClusterStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	Replicas int32 `json:"replicas,omitempty"`
+
+	Replica int32 `json:"replica"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
-//+kubebuilder:printcolumn:JSONPath=".status.Replicas",name=Replicas,type=integer
+// +kubebuilder:object:root=true
+// +kubebuilder:printcolumn:name="Image",type="string",JSONPath=".spec.image",description="The Docker Image of MyAPP"
+// +kubebuilder:printcolumn:JSONPath=".status.replica",name=Replica,type=integer
+// +kubebuilder:subresource:status
 
 // MysqlCluster is the Schema for the mysqlclusters API
 type MysqlCluster struct {

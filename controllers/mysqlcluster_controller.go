@@ -18,6 +18,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -26,6 +27,7 @@ import (
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	batchv1 "github.com/kbsonlong/mysql-operator/api/v1"
@@ -67,28 +69,43 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	err = r.Get(ctx, req.NamespacedName, statefulset)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			log.Info("Create StatefulSet", cluster.Name)
-			err = r.CreateStatefulSet(ctx, cluster)
+			log.Info("Create StatefulSet")
+			err = r.doReconcileStatefulSet(ctx, cluster)
 			if err != nil {
 				r.Recorder.Event(cluster, k8scorev1.EventTypeWarning, "FailedCreateStatefulSet", err.Error())
 				return ctrl.Result{}, err
 			}
-			cluster.Status.Replicas = *cluster.Spec.Replicas
-			err = r.Update(ctx, cluster)
+
+			log.Info("update mysqlcluster state")
+			fmt.Println(*cluster.Spec.Replicas)
+			cluster.Status.Replica = *cluster.Spec.Replicas
+			// 必须使用 r.Status().Update() 更新，否则不会展示 Status 字段
+			err = r.Status().Update(ctx, cluster)
 			if err != nil {
 				r.Recorder.Event(cluster, k8scorev1.EventTypeWarning, "FailedUpdateStatus", err.Error())
 				return ctrl.Result{}, err
 			}
+
 		}
-		return ctrl.Result{}, err
-	}
-	//binding StatefulSet to MysqlCluster
-	if err = ctrl.SetControllerReference(cluster, statefulset, r.Scheme); err != nil {
 		return ctrl.Result{}, err
 	}
 
 	// TODO(user): 初始化 MySQL 主从集群
 	// _ = r.InitMysqlCluster(ctx, cluster)
+
+	pod := &k8scorev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: cluster.Namespace,
+			Labels:    r.Labels(cluster),
+		},
+	}
+	err = r.Get(ctx, req.NamespacedName, pod)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			log.Info("Not found pod")
+		}
+		// return ctrl.Result{}, err
+	}
 
 	return ctrl.Result{}, nil
 }
@@ -101,7 +118,9 @@ func (r *MysqlClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *MysqlClusterReconciler) CreateStatefulSet(ctx context.Context, cluster *batchv1.MysqlCluster) error {
+func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, cluster *batchv1.MysqlCluster) error {
+
+	log := log.FromContext(ctx)
 	statefulset := &apps.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: cluster.Namespace,
@@ -110,16 +129,12 @@ func (r *MysqlClusterReconciler) CreateStatefulSet(ctx context.Context, cluster 
 		Spec: apps.StatefulSetSpec{
 			Replicas: pointer.Int32(*cluster.Spec.Replicas),
 			Selector: &metav1.LabelSelector{
-				MatchLabels: map[string]string{
-					"app": cluster.Name,
-				},
+				MatchLabels: r.Labels(cluster),
 			},
 
 			Template: k8scorev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
-					Labels: map[string]string{
-						"app": cluster.Name,
-					},
+					Labels: r.Labels(cluster),
 				},
 				Spec: k8scorev1.PodSpec{
 					Containers: []k8scorev1.Container{
@@ -146,10 +161,94 @@ func (r *MysqlClusterReconciler) CreateStatefulSet(ctx context.Context, cluster 
 			},
 		},
 	}
+
+	// statefulset 与 crd 资源建立关联,
+	// 建立关联后，删除 crd 资源时就会将 statefulset 也删除掉
+	log.Info("set reference")
+	if err := controllerutil.SetControllerReference(cluster, statefulset, r.Scheme); err != nil {
+		log.Error(err, "SetControllerReference error")
+		return err
+	}
 	err := r.Create(ctx, statefulset)
 	if err != nil {
 		return err
 	}
+	err = r.doReconcileService(ctx, cluster)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster *batchv1.MysqlCluster) error {
+
+	log := log.FromContext(ctx)
+	// log := r.Log.WithValues("func", "doReconcileService")
+	svc := &k8scorev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: cluster.Namespace,
+			Name:      cluster.Name,
+		},
+		Spec: k8scorev1.ServiceSpec{
+			Ports: []k8scorev1.ServicePort{
+				{
+					Name:     "mysql",
+					Port:     3306,
+					Protocol: k8scorev1.ProtocolSCTP,
+				},
+			},
+			Selector: r.Labels(cluster),
+			Type:     k8scorev1.ServiceTypeClusterIP,
+		},
+	}
+
+	// service 与 crd 资源建立关联,
+	// 建立关联后，删除 crd 资源时就会将 service 也删除掉
+	log.Info("set reference")
+	if err := controllerutil.SetControllerReference(cluster, svc, r.Scheme); err != nil {
+		log.Error(err, "SetControllerReference error")
+		return err
+	}
+	// 创建service
+	log.Info("start create service")
+	if err := r.Create(ctx, svc); err != nil {
+		log.Error(err, "create service error")
+		return err
+	}
+
+	// 创建 headless service
+	headlessService := &k8scorev1.Service{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "Service",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: cluster.Namespace,
+			Name:      fmt.Sprintf("%s-headless", cluster.Name),
+			Labels:    r.Labels(cluster),
+		},
+		Spec: k8scorev1.ServiceSpec{
+			Ports: []k8scorev1.ServicePort{
+				{
+					Name:     "mysql",
+					Port:     3306,
+					Protocol: k8scorev1.ProtocolSCTP,
+				},
+			},
+			Selector:  r.Labels(cluster),
+			Type:      k8scorev1.ServiceTypeClusterIP,
+			ClusterIP: "None",
+		},
+	}
+
+	log.Info("start create headlessService")
+	if err := r.Create(ctx, headlessService); err != nil {
+		log.Error(err, "create headlessService error")
+		return err
+	}
+
+	log.Info("create service success")
+
 	return nil
 }
 
@@ -158,3 +257,21 @@ func (r *MysqlClusterReconciler) CreateStatefulSet(ctx context.Context, cluster 
 // 	err = r.Get(ctx, cluster.Namespace, pod)
 
 // }
+
+const (
+	NameLabel         = "app.kubernetes.io/name"
+	InstanceLabel     = "app.kubernetes.io/instance"
+	ManagedByLabel    = "app.kubernetes.io/managed-by"
+	PartOfLabel       = "app.kubernetes.io/part-of"
+	ComponentLabel    = "app.kubernetes.io/component"
+	MySQLPrimaryLabel = "mysql.alongparty.cn/primary"
+)
+
+func (r *MysqlClusterReconciler) Labels(cluster *batchv1.MysqlCluster) map[string]string {
+	return map[string]string{
+		NameLabel:      "mysql-server",
+		InstanceLabel:  cluster.Name,
+		ManagedByLabel: "mysql-server-operator",
+		PartOfLabel:    "mysql-server",
+	}
+}
