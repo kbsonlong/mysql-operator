@@ -1,19 +1,12 @@
 /*
  * @Author: kbsonlong kbsonlong@gmail.com
- * @Date: 2023-05-09 11:17:16
+ * @Date: 2023-05-09 19:49:35
  * @LastEditors: kbsonlong kbsonlong@gmail.com
- * @LastEditTime: 2023-05-09 16:59:06
+ * @LastEditTime: 2023-05-09 22:40:31
  * @FilePath: /mysql-operator/pkg/k8s/cm.go
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
-/*
- * @Author: kbsonlong kbsonlong@gmail.com
- * @Date: 2023-05-09 11:17:16
- * @LastEditors: kbsonlong kbsonlong@gmail.com
- * @LastEditTime: 2023-05-09 16:58:43
- * @FilePath: /mysql-operator/pkg/k8s/cm.go
- * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
- */
+
 package k8s
 
 import (
@@ -41,35 +34,60 @@ func CreateConfig(c client.Client, ctx context.Context, ctrl ctrl.Request, clust
 			Namespace: cluster.Namespace,
 		},
 	}
-	err := c.Get(ctx, ctrl.NamespacedName, cm)
+
+	ex, err := os.Executable()
+	if err != nil {
+		panic(err)
+	}
+	exPath := filepath.Dir(ex)
+	realPath, err := filepath.EvalSymlinks(exPath)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(filepath.Dir(realPath))
+
+	cfg, err := ini.Load(fmt.Sprintf("%s/cfg/my.cnf", realPath))
+	// cfg := ini.Empty()
+	// Section, err := cfg.NewSection("mysqld")
+	mysqldSection := cfg.Section("mysqld")
+	mysqldSection.NewBooleanKey("skip-name-resolve")
+	mysqldSection.NewBooleanKey("log_slave_updates")
+	mysqldSection.NewBooleanKey("innodb_file_per_table")
+	mysqldSection.NewBooleanKey("core-file")
+
+	mysqlSection := cfg.Section("mysql")
+	mysqlSection.NewBooleanKey("auto-rehash")
+
+	mysqlhotcopy := cfg.Section("mysqlhotcopy")
+	mysqlhotcopy.NewBooleanKey("interactive-timeout")
+
+	if err != nil {
+		fmt.Println("new mysql section failed:", err)
+		return err
+	}
+	data, _ := writeConfigs(cfg)
+	err = c.Get(ctx, ctrl.NamespacedName, cm)
 	if err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("Create ConfigMap")
-			ex, err := os.Executable()
-			if err != nil {
-				panic(err)
-			}
-			exPath := filepath.Dir(ex)
-			realPath, err := filepath.EvalSymlinks(exPath)
-			if err != nil {
-				panic(err)
-			}
-			fmt.Println(filepath.Dir(realPath))
-
-			cfg, err := ini.Load(fmt.Sprintf("%s/cfg/my.cnf", realPath))
-			if err != nil {
-				fmt.Println("new mysql section failed:", err)
-				return err
-			}
-			fmt.Println(cfg.MapTo(map[string]string{}))
-			data, _ := writeConfigs(cfg)
 			cm.Data = map[string]string{
 				"my.cnf": data,
 			}
-
 			c.Create(ctx, cm)
+			return nil
 		}
+		fmt.Println("error creating ConfigMap")
 	}
+
+	cm.Data = map[string]string{
+		"my.cnf": data,
+	}
+	err = c.Update(ctx, cm)
+	if err != nil {
+		log.Info("Update ConfigMap failed")
+		return err
+	}
+	fmt.Print("Updated ConfigMap successfully")
 	return nil
 }
 

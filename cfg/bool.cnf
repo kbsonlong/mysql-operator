@@ -1,0 +1,5 @@
+[mysqld]
+skip-name-resolve
+core-file
+log_slave_updates
+innodb_file_per_table

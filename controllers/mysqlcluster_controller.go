@@ -34,7 +34,7 @@ import (
 
 	batchv1 "github.com/kbsonlong/mysql-operator/api/v1"
 	"github.com/kbsonlong/mysql-operator/pkg/k8s"
-	"github.com/kbsonlong/mysql-operator/pkg/sql"
+	"github.com/kbsonlong/mysql-operator/pkg/mysql"
 	apps "k8s.io/api/apps/v1"
 	k8scorev1 "k8s.io/api/core/v1"
 )
@@ -109,22 +109,7 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	}
 
 	// TODO(user): 初始化 MySQL 主从集群
-	// _ = r.InitMysqlCluster(ctx, cluster)
-	dsn := sql.GetDsn(map[string]interface{}{"user_name": "root", "password": "123456", "host": fmt.Sprintf("%s-0", cluster.Name)})
-	fmt.Println(dsn)
-	db := sql.DbConnect(dsn)
-	fmt.Println(db.Stats().OpenConnections)
-
-	Pods, err := r.getPods(ctx, cluster)
-	if err != nil && !errors.IsNotFound(err) {
-		return ctrl.Result{}, err
-	}
-	fmt.Println(len(Pods.Items))
-	for _, pod := range Pods.Items {
-		if pod.Status.ContainerStatuses[0].Ready {
-			fmt.Println(pod.Name)
-		}
-	}
+	_ = r.InitMysqlCluster(ctx, cluster)
 
 	return ctrl.Result{}, nil
 }
@@ -141,6 +126,17 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 
 	log := log.FromContext(ctx)
 
+	fileMode := int32(0644)
+	volumes := []k8scorev1.Volume{
+		ensureVolume("config", k8scorev1.VolumeSource{
+			ConfigMap: &k8scorev1.ConfigMapVolumeSource{
+				LocalObjectReference: k8scorev1.LocalObjectReference{
+					Name: cluster.Name,
+				},
+				DefaultMode: &fileMode,
+			},
+		}),
+	}
 	statefulset := &apps.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: cluster.Namespace,
@@ -188,26 +184,15 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 									ContainerPort: 3306,
 								},
 							},
+							VolumeMounts: []k8scorev1.VolumeMount{
+								{
+									Name:      "config",
+									MountPath: "/etc/mysql/conf.d/",
+								},
+							},
 						},
 					},
-					// Volumes: []k8scorev1.Volume{
-					// 	{
-					// 		Name: "config",
-					// 		VolumeSource: []k8scorev1.VolumeSource{
-					// 			{
-					// 				ConfigMap: []k8scorev1.ConfigMapVolumeSource{
-					// 					{
-					// 						Items: []k8scorev1.KeyToPath{
-					// 							{
-					// 								Key: ,
-					// 							}
-					// 						},
-					// 					}
-					// 				},
-					// 			}
-					// 		},
-					// 	}
-					// },
+					Volumes: volumes,
 				},
 			},
 		},
@@ -215,7 +200,7 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 
 	// statefulset 与 crd 资源建立关联,
 	// 建立关联后，删除 crd 资源时就会将 statefulset 也删除掉
-	log.Info("set reference")
+	log.Info("set sts reference")
 	if err := controllerutil.SetControllerReference(cluster, statefulset, r.Scheme); err != nil {
 		log.Error(err, "SetControllerReference error")
 		return err
@@ -229,6 +214,13 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 		return err
 	}
 	return nil
+}
+
+func ensureVolume(name string, source k8scorev1.VolumeSource) k8scorev1.Volume {
+	return k8scorev1.Volume{
+		Name:         name,
+		VolumeSource: source,
+	}
 }
 
 func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster *batchv1.MysqlCluster) error {
@@ -255,7 +247,7 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 
 	// service 与 crd 资源建立关联,
 	// 建立关联后，删除 crd 资源时就会将 service 也删除掉
-	log.Info("set reference")
+	log.Info("set svc reference")
 	if err := controllerutil.SetControllerReference(cluster, svc, r.Scheme); err != nil {
 		log.Error(err, "SetControllerReference error")
 		return err
@@ -311,11 +303,50 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 	return nil
 }
 
-// func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *batchv1.MysqlCluster) error {
-// 	pod := &k8scorev1.Pod{}
-// 	err = r.Get(ctx, cluster.Namespace, pod)
+func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *batchv1.MysqlCluster) error {
 
-// }
+	Pods, err := r.getPods(ctx, cluster)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	fmt.Println(len(Pods.Items))
+	for _, pod := range Pods.Items {
+		if pod.Status.ContainerStatuses[0].Ready {
+			fmt.Println(pod.Name)
+		}
+	}
+
+	var host string
+	// host = fmt.Sprintf("%s-0", cluster.Name)
+	host = "10.86.232.28"
+	dsn := mysql.GetDsn(map[string]interface{}{"user_name": "root", "password": "123456", "host": host})
+	db := mysql.DbConnect(dsn)
+
+	//stpt3：查询数据库
+	rows, err := db.Query("show master status;")
+	if err != nil {
+		fmt.Println("查询有误。。")
+		return err
+	}
+	for rows.Next() {
+		var pos int
+		var file string
+		if err := rows.Scan(&file, &pos); err != nil {
+			fmt.Println("获取失败。。")
+		}
+		fmt.Sprintf(`change master to master_host='%s',
+		master_user='%s',
+		master_password='%s',
+		master_port=%d,
+		master_log_file='%s',
+		master_log_pos=%d,
+		master_connect_retry=30;
+		`, host, "slave", "123456", 3306, file, pos)
+	}
+
+	return nil
+
+}
 
 const (
 	NameLabel         = "app.kubernetes.io/name"
