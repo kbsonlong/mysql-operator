@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/pointer"
@@ -32,6 +33,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	batchv1 "github.com/kbsonlong/mysql-operator/api/v1"
+	"github.com/kbsonlong/mysql-operator/pkg/k8s"
 	"github.com/kbsonlong/mysql-operator/pkg/sql"
 	apps "k8s.io/api/apps/v1"
 	k8scorev1 "k8s.io/api/core/v1"
@@ -68,7 +70,16 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	if err != nil {
 		return ctrl.Result{}, nil
 	}
+	err = k8s.CreateConfig(r.Client, ctx, req, cluster)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	err = k8s.CretaeOrUpdateSecret(r.Client, ctx, req, cluster)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	err = r.Get(ctx, req.NamespacedName, statefulset)
+	r.Recorder.Event(cluster, k8scorev1.EventTypeNormal, "CreateStatefulSet", fmt.Sprintf("Create StatefulSet %s/%s Now", req.Namespace, cluster.Name))
 	if err != nil {
 		if errors.IsNotFound(err) {
 			log.Info("Create StatefulSet")
@@ -77,6 +88,7 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				r.Recorder.Event(cluster, k8scorev1.EventTypeWarning, "FailedCreateStatefulSet", err.Error())
 				return ctrl.Result{}, err
 			}
+			r.Recorder.Event(cluster, k8scorev1.EventTypeNormal, "Created", fmt.Sprintf("Created StatefulSet %s/%s", req.Namespace, cluster.Name))
 
 			log.Info("update mysqlcluster state")
 			fmt.Println(*cluster.Spec.Replicas)
@@ -103,18 +115,15 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 	db := sql.DbConnect(dsn)
 	fmt.Println(db.Stats().OpenConnections)
 
-	pod := &k8scorev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: cluster.Namespace,
-			Labels:    r.Labels(cluster),
-		},
+	Pods, err := r.getPods(ctx, cluster)
+	if err != nil && !errors.IsNotFound(err) {
+		return ctrl.Result{}, err
 	}
-	err = r.Get(ctx, req.NamespacedName, pod)
-	if err != nil {
-		if errors.IsNotFound(err) {
-			log.Info("Not found pod")
+	fmt.Println(len(Pods.Items))
+	for _, pod := range Pods.Items {
+		if pod.Status.ContainerStatuses[0].Ready {
+			fmt.Println(pod.Name)
 		}
-		// return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
@@ -131,6 +140,7 @@ func (r *MysqlClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, cluster *batchv1.MysqlCluster) error {
 
 	log := log.FromContext(ctx)
+
 	statefulset := &apps.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: cluster.Namespace,
@@ -152,12 +162,25 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 							Name:            cluster.Name,
 							Image:           *&cluster.Spec.Image,
 							ImagePullPolicy: "IfNotPresent",
-							Env: []k8scorev1.EnvVar{
+							EnvFrom: []k8scorev1.EnvFromSource{
 								{
-									Name:  "MYSQL_ROOT_PASSWORD",
-									Value: "123456",
+									SecretRef: &k8scorev1.SecretEnvSource{
+										LocalObjectReference: k8scorev1.LocalObjectReference{
+											Name: k8s.GetSecretName(cluster.Name),
+										},
+									},
 								},
 							},
+							// Env: []k8scorev1.EnvVar{
+							// 	{
+							// 		Name:  "TEST_ENV",
+							// 		Value: "123456",
+							// 	},
+							// 	{
+							// 		Name:  "MYSQL_ROOT_PASSWORD",
+							// 		Value: "$(TEST_ENV)",
+							// 	},
+							// },
 							Ports: []k8scorev1.ContainerPort{
 								{
 									Name:          "mysql",
@@ -167,6 +190,24 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 							},
 						},
 					},
+					// Volumes: []k8scorev1.Volume{
+					// 	{
+					// 		Name: "config",
+					// 		VolumeSource: []k8scorev1.VolumeSource{
+					// 			{
+					// 				ConfigMap: []k8scorev1.ConfigMapVolumeSource{
+					// 					{
+					// 						Items: []k8scorev1.KeyToPath{
+					// 							{
+					// 								Key: ,
+					// 							}
+					// 						},
+					// 					}
+					// 				},
+					// 			}
+					// 		},
+					// 	}
+					// },
 				},
 			},
 		},
@@ -292,4 +333,16 @@ func (r *MysqlClusterReconciler) Labels(cluster *batchv1.MysqlCluster) map[strin
 		ManagedByLabel: "mysql-server-operator",
 		PartOfLabel:    "mysql-server",
 	}
+}
+
+func (r *MysqlClusterReconciler) getPods(ctx context.Context, cluster *batchv1.MysqlCluster) (k8scorev1.PodList, error) {
+	Pods := k8scorev1.PodList{}
+	err := r.Client.List(ctx,
+		&Pods,
+		&client.ListOptions{
+			Namespace:     cluster.Namespace,
+			LabelSelector: labels.SelectorFromSet(r.Labels(cluster)),
+		},
+	)
+	return Pods, err
 }

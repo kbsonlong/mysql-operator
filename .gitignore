@@ -26,3 +26,5 @@ Dockerfile.cross
 *~
 __*
 go.work*
+test/*
+cfg/*

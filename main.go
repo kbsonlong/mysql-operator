@@ -92,6 +92,8 @@ func main() {
 	if err = (&controllers.MysqlClusterReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		// Recorder 的事件(Event)初始化逻辑
+		Recorder: mgr.GetEventRecorderFor("MysqlCluster"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MysqlCluster")
 		os.Exit(1)
