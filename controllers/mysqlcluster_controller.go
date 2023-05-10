@@ -46,6 +46,32 @@ type MysqlClusterReconciler struct {
 	Recorder record.EventRecorder
 }
 
+const (
+	NameLabel         = "app.kubernetes.io/name"
+	InstanceLabel     = "app.kubernetes.io/instance"
+	ManagedByLabel    = "app.kubernetes.io/managed-by"
+	PartOfLabel       = "app.kubernetes.io/part-of"
+	ComponentLabel    = "app.kubernetes.io/component"
+	MySQLPrimaryLabel = "mysql.alongparty.cn/primary"
+)
+
+type MasterInfo struct {
+	master_host     string
+	master_user     string
+	master_log_file string
+	master_log_pos  int
+	master_port     int
+	master_password string
+}
+
+type MasterBinInfo struct {
+	File              string
+	Position          int
+	Binlog_Do_DB      string
+	Binlog_Ignore_DB  string
+	Executed_Gtid_Set string
+}
+
 //+kubebuilder:rbac:groups=batch.alongparty.cn,resources=mysqlclusters,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=batch.alongparty.cn,resources=mysqlclusters/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=batch.alongparty.cn,resources=mysqlclusters/finalizers,verbs=update
@@ -136,7 +162,84 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 				DefaultMode: &fileMode,
 			},
 		}),
+		ensureVolume("dynamic", k8scorev1.VolumeSource{
+			EmptyDir: &k8scorev1.EmptyDirVolumeSource{},
+		}),
+		ensureVolume("initdb", k8scorev1.VolumeSource{
+			ConfigMap: &k8scorev1.ConfigMapVolumeSource{
+				LocalObjectReference: k8scorev1.LocalObjectReference{
+					Name: fmt.Sprintf("%s-initdb", cluster.Name),
+				},
+				DefaultMode: &fileMode,
+			},
+		}),
 	}
+
+	containers := []k8scorev1.Container{
+		{
+			Name:            cluster.Name,
+			Image:           *&cluster.Spec.Image,
+			ImagePullPolicy: "IfNotPresent",
+			EnvFrom: []k8scorev1.EnvFromSource{
+				{
+					SecretRef: &k8scorev1.SecretEnvSource{
+						LocalObjectReference: k8scorev1.LocalObjectReference{
+							Name: k8s.GetSecretName(cluster.Name),
+						},
+					},
+				},
+			},
+			// Env: []k8scorev1.EnvVar{
+			// 	{
+			// 		Name:  "TEST_ENV",
+			// 		Value: "123456",
+			// 	},
+			// 	{
+			// 		Name:  "MYSQL_ROOT_PASSWORD",
+			// 		Value: "$(TEST_ENV)",
+			// 	},
+			// },
+			Ports: []k8scorev1.ContainerPort{
+				{
+					Name:          "mysql",
+					Protocol:      k8scorev1.ProtocolSCTP,
+					ContainerPort: 3306,
+				},
+			},
+			VolumeMounts: []k8scorev1.VolumeMount{
+				{
+					Name:      "config",
+					MountPath: "/etc/mysql/conf.d/",
+				},
+				{
+					Name:      "dynamic",
+					MountPath: "/etc/mysql/mysql.conf.d/",
+				},
+				{
+					Name:      "initdb",
+					MountPath: "/docker-entrypoint-initdb.d",
+				},
+			},
+		},
+	}
+
+	var init_cmd string
+	init_cmd = fmt.Sprintf("echo -e \"[mysqld]\nserver-id=$(echo $HOSTNAME | awk -F '-' '{print $NF}')\">/etc/mysql/mysql.conf.d/dynamic.cnf")
+	initContainers := []k8scorev1.Container{
+		{
+			Name:            fmt.Sprintf("%s-init", cluster.Name),
+			Image:           *&cluster.Spec.Image,
+			ImagePullPolicy: "IfNotPresent",
+			Command:         []string{"/bin/sh", "-c", init_cmd},
+			VolumeMounts: []k8scorev1.VolumeMount{
+				{
+					Name:      "dynamic",
+					MountPath: "/etc/mysql/mysql.conf.d/",
+				},
+			},
+		},
+	}
+
 	statefulset := &apps.StatefulSet{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: cluster.Namespace,
@@ -153,46 +256,9 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 					Labels: r.Labels(cluster),
 				},
 				Spec: k8scorev1.PodSpec{
-					Containers: []k8scorev1.Container{
-						{
-							Name:            cluster.Name,
-							Image:           *&cluster.Spec.Image,
-							ImagePullPolicy: "IfNotPresent",
-							EnvFrom: []k8scorev1.EnvFromSource{
-								{
-									SecretRef: &k8scorev1.SecretEnvSource{
-										LocalObjectReference: k8scorev1.LocalObjectReference{
-											Name: k8s.GetSecretName(cluster.Name),
-										},
-									},
-								},
-							},
-							// Env: []k8scorev1.EnvVar{
-							// 	{
-							// 		Name:  "TEST_ENV",
-							// 		Value: "123456",
-							// 	},
-							// 	{
-							// 		Name:  "MYSQL_ROOT_PASSWORD",
-							// 		Value: "$(TEST_ENV)",
-							// 	},
-							// },
-							Ports: []k8scorev1.ContainerPort{
-								{
-									Name:          "mysql",
-									Protocol:      k8scorev1.ProtocolSCTP,
-									ContainerPort: 3306,
-								},
-							},
-							VolumeMounts: []k8scorev1.VolumeMount{
-								{
-									Name:      "config",
-									MountPath: "/etc/mysql/conf.d/",
-								},
-							},
-						},
-					},
-					Volumes: volumes,
+					InitContainers: initContainers,
+					Containers:     containers,
+					Volumes:        volumes,
 				},
 			},
 		},
@@ -316,46 +382,35 @@ func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *
 		}
 	}
 
+	var info MasterBinInfo
 	var host string
-	// host = fmt.Sprintf("%s-0", cluster.Name)
-	host = "10.86.232.28"
+	host = fmt.Sprintf("%s-0", cluster.Name)
+	// host = "10.86.232.28"
 	dsn := mysql.GetDsn(map[string]interface{}{"user_name": "root", "password": "123456", "host": host})
 	db := mysql.DbConnect(dsn)
 
 	//stpt3：查询数据库
-	rows, err := db.Query("show master status;")
+	row := db.QueryRow("show master status;")
 	if err != nil {
 		fmt.Println("查询有误。。")
 		return err
 	}
-	for rows.Next() {
-		var pos int
-		var file string
-		if err := rows.Scan(&file, &pos); err != nil {
-			fmt.Println("获取失败。。")
-		}
-		fmt.Sprintf(`change master to master_host='%s',
+
+	if err := row.Scan(&info.File, &info.Binlog_Do_DB, &info.Binlog_Ignore_DB, &info.Executed_Gtid_Set, &info.Position); err != nil {
+		fmt.Println("获取失败。。")
+	}
+	fmt.Printf(`change master to master_host='%s',
 		master_user='%s',
 		master_password='%s',
 		master_port=%d,
 		master_log_file='%s',
 		master_log_pos=%d,
 		master_connect_retry=30;
-		`, host, "slave", "123456", 3306, file, pos)
-	}
+		`, host, "slave", "123456", 3306, info.File, info.Position)
 
 	return nil
 
 }
-
-const (
-	NameLabel         = "app.kubernetes.io/name"
-	InstanceLabel     = "app.kubernetes.io/instance"
-	ManagedByLabel    = "app.kubernetes.io/managed-by"
-	PartOfLabel       = "app.kubernetes.io/part-of"
-	ComponentLabel    = "app.kubernetes.io/component"
-	MySQLPrimaryLabel = "mysql.alongparty.cn/primary"
-)
 
 func (r *MysqlClusterReconciler) Labels(cluster *batchv1.MysqlCluster) map[string]string {
 	return map[string]string{
