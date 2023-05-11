@@ -2,7 +2,7 @@
  * @Author: kbsonlong kbsonlong@gmail.com
  * @Date: 2023-05-09 19:49:35
  * @LastEditors: kbsonlong kbsonlong@gmail.com
- * @LastEditTime: 2023-05-10 22:55:34
+ * @LastEditTime: 2023-05-11 13:16:47
  * @FilePath: /mysql-operator/pkg/k8s/cm.go
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -46,25 +46,25 @@ func CreateConfig(c client.Client, ctx context.Context, ctrl ctrl.Request, clust
 	}
 	fmt.Println(filepath.Dir(realPath))
 
-	cfg, err := ini.Load(fmt.Sprintf("%s/cfg/my.cnf", realPath))
-	// cfg := ini.Empty()
-	// Section, err := cfg.NewSection("mysqld")
-	mysqldSection := cfg.Section("mysqld")
-	mysqldSection.NewBooleanKey("skip-name-resolve")
+	// cfg, err := ini.Load(fmt.Sprintf("%s/cfg/my.cnf", realPath))
+	cfg := ini.Empty()
+	mysqldSection, err := cfg.NewSection("mysqld")
+	// mysqldSection := cfg.Section("mysqld")
+	// mysqldSection.NewBooleanKey("skip-name-resolve")
 	mysqldSection.NewBooleanKey("log_slave_updates")
-	mysqldSection.NewBooleanKey("innodb_file_per_table")
-	mysqldSection.NewBooleanKey("core-file")
+	// mysqldSection.NewBooleanKey("innodb_file_per_table")
+	// mysqldSection.NewBooleanKey("core-file")
 
-	mysqlSection := cfg.Section("mysql")
-	mysqlSection.NewBooleanKey("auto-rehash")
+	// mysqlSection := cfg.Section("mysql")
+	// mysqlSection.NewBooleanKey("auto-rehash")
 
-	mysqlhotcopy := cfg.Section("mysqlhotcopy")
-	mysqlhotcopy.NewBooleanKey("interactive-timeout")
+	// mysqlhotcopy := cfg.Section("mysqlhotcopy")
+	// mysqlhotcopy.NewBooleanKey("interactive-timeout")
 
-	if err != nil {
-		fmt.Println("new mysql section failed:", err)
-		return err
-	}
+	// if err != nil {
+	// 	fmt.Println("new mysql section failed:", err)
+	// 	return err
+	// }
 	data, _ := writeConfigs(cfg)
 	err = c.Get(ctx, ctrl.NamespacedName, cm)
 	if err != nil {

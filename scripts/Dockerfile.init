@@ -1,0 +1,4 @@
+FROM alpine
+WORKDIR /init
+COPY init.sh .
+CMD ["/init/init.sh"]

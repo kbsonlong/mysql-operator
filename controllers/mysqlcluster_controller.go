@@ -56,15 +56,19 @@ const (
 )
 
 type MasterInfo struct {
-	master_host     string
-	master_user     string
 	master_log_file string
 	master_log_pos  int
-	master_port     int
-	master_password string
+	node            NodeInfo
+	binlog          BinLogInfo
 }
 
-type MasterBinInfo struct {
+type NodeInfo struct {
+	user     string
+	password string
+	host     string
+	port     int
+}
+type BinLogInfo struct {
 	File              string
 	Position          int
 	Binlog_Do_DB      string
@@ -165,14 +169,14 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 		ensureVolume("dynamic", k8scorev1.VolumeSource{
 			EmptyDir: &k8scorev1.EmptyDirVolumeSource{},
 		}),
-		ensureVolume("initdb", k8scorev1.VolumeSource{
-			ConfigMap: &k8scorev1.ConfigMapVolumeSource{
-				LocalObjectReference: k8scorev1.LocalObjectReference{
-					Name: fmt.Sprintf("%s-initdb", cluster.Name),
-				},
-				DefaultMode: &fileMode,
-			},
-		}),
+		// ensureVolume("initdb", k8scorev1.VolumeSource{
+		// 	ConfigMap: &k8scorev1.ConfigMapVolumeSource{
+		// 		LocalObjectReference: k8scorev1.LocalObjectReference{
+		// 			Name: fmt.Sprintf("%s-initdb", cluster.Name),
+		// 		},
+		// 		DefaultMode: &fileMode,
+		// 	},
+		// }),
 	}
 
 	containers := []k8scorev1.Container{
@@ -215,22 +219,22 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 					Name:      "dynamic",
 					MountPath: "/etc/mysql/mysql.conf.d/",
 				},
-				{
-					Name:      "initdb",
-					MountPath: "/docker-entrypoint-initdb.d",
-				},
+				// {
+				// 	Name:      "initdb",
+				// 	MountPath: "/docker-entrypoint-initdb.d",
+				// },
 			},
 		},
 	}
 
-	var init_cmd string
-	init_cmd = fmt.Sprintf("echo -e \"[mysqld]\nserver-id=$(echo $HOSTNAME | awk -F '-' '{print $NF}')\">/etc/mysql/mysql.conf.d/dynamic.cnf")
+	// var init_cmd string
+	// init_cmd = fmt.Sprintf("echo -e \"[mysqld]\nserver-id=1$(echo $HOSTNAME | awk -F '-' '{print $NF}')\">/etc/mysql/mysql.conf.d/dynamic.cnf")
 	initContainers := []k8scorev1.Container{
 		{
 			Name:            fmt.Sprintf("%s-init", cluster.Name),
-			Image:           *&cluster.Spec.Image,
+			Image:           *&cluster.Spec.InitImage,
 			ImagePullPolicy: "IfNotPresent",
-			Command:         []string{"/bin/sh", "-c", init_cmd},
+			// Command:         []string{"/bin/sh", "-c", init_cmd},
 			VolumeMounts: []k8scorev1.VolumeMount{
 				{
 					Name:      "dynamic",
@@ -293,10 +297,12 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 
 	log := log.FromContext(ctx)
 	// log := r.Log.WithValues("func", "doReconcileService")
+	selector := r.Labels(cluster)
 	svc := &k8scorev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: cluster.Namespace,
 			Name:      cluster.Name,
+			Labels:    selector,
 		},
 		Spec: k8scorev1.ServiceSpec{
 			Ports: []k8scorev1.ServicePort{
@@ -306,7 +312,7 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 					Protocol: k8scorev1.ProtocolSCTP,
 				},
 			},
-			Selector: r.Labels(cluster),
+			Selector: selector,
 			Type:     k8scorev1.ServiceTypeClusterIP,
 		},
 	}
@@ -327,14 +333,10 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 
 	// 创建 headless service
 	headlessService := &k8scorev1.Service{
-		TypeMeta: metav1.TypeMeta{
-			APIVersion: "v1",
-			Kind:       "Service",
-		},
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: cluster.Namespace,
-			Name:      fmt.Sprintf("%s-headless", cluster.Name),
-			Labels:    r.Labels(cluster),
+			Name:      cluster.Name,
+			Labels:    selector,
 		},
 		Spec: k8scorev1.ServiceSpec{
 			Ports: []k8scorev1.ServicePort{
@@ -344,7 +346,7 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 					Protocol: k8scorev1.ProtocolSCTP,
 				},
 			},
-			Selector:  r.Labels(cluster),
+			Selector:  selector,
 			Type:      k8scorev1.ServiceTypeClusterIP,
 			ClusterIP: "None",
 		},
@@ -364,13 +366,6 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 		return err
 	}
 
-	log.Info("create service success")
-
-	return nil
-}
-
-func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *batchv1.MysqlCluster) error {
-
 	Pods, err := r.getPods(ctx, cluster)
 	if err != nil && !errors.IsNotFound(err) {
 		return err
@@ -382,31 +377,92 @@ func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *
 		}
 	}
 
-	var info MasterBinInfo
-	var host string
-	host = fmt.Sprintf("%s-0", cluster.Name)
-	// host = "10.86.232.28"
-	dsn := mysql.GetDsn(map[string]interface{}{"user_name": "root", "password": "123456", "host": host})
+	for i := 0; i < int(*cluster.Spec.Replicas); i++ {
+		fmt.Println(i)
+		pod_name := fmt.Sprintf("%s-%d", cluster.Name, i)
+		selector = map[string]string{
+			"statefulset.kubernetes.io/pod-name": pod_name,
+			NameLabel:                            "mysql-server",
+			InstanceLabel:                        cluster.Name,
+			ManagedByLabel:                       "mysql-server-operator",
+			PartOfLabel:                          "mysql-server",
+		}
+		pod_svc := &k8scorev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: cluster.Namespace,
+				Name:      pod_name,
+				Labels:    selector,
+			},
+			Spec: k8scorev1.ServiceSpec{
+				Ports: []k8scorev1.ServicePort{
+					{
+						Name:     "mysql",
+						Port:     3306,
+						Protocol: k8scorev1.ProtocolSCTP,
+					},
+				},
+				Selector: selector,
+				Type:     k8scorev1.ServiceTypeClusterIP,
+			},
+		}
+
+		log.Info("start create Pod Service")
+		if err := r.Create(ctx, pod_svc); err != nil {
+			log.Error(err, "create pod_svc error")
+			return err
+		}
+	}
+
+	log.Info("create service success")
+
+	return nil
+}
+
+func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *batchv1.MysqlCluster) error {
+
+	var info BinLogInfo
+	var node NodeInfo
+	var master_host, change_sql, slave_host string
+	// master_host = fmt.Sprintf("%s-0", cluster.Name)
+	master_host = "10.86.239.234"
+	dsn := mysql.GetDsn(map[string]interface{}{"user_name": "root", "password": "123456", "host": master_host})
 	db := mysql.DbConnect(dsn)
 
-	//stpt3：查询数据库
-	row := db.QueryRow("show master status;")
-	if err != nil {
-		fmt.Println("查询有误。。")
-		return err
+	// 创建同步用户
+	err := db.QueryRow("SELECT user,host FROM mysql.user WHERE user='slave'").Scan(&node.user, &node.host)
+	fmt.Println(node.user, node.host)
+	if node.user != "slave" {
+		_, err = db.Exec("CREATE USER 'slave'@'%' IDENTIFIED BY '123456'")
+		if err != nil {
+			return err
+		}
+		_, err = db.Exec("GRANT SELECT, RELOAD, SUPER, REPLICATION SLAVE, REPLICATION CLIENT, SHOW VIEW ON *.* TO 'slave'@'%';")
+		if err != nil {
+			return err
+		}
 	}
 
-	if err := row.Scan(&info.File, &info.Binlog_Do_DB, &info.Binlog_Ignore_DB, &info.Executed_Gtid_Set, &info.Position); err != nil {
-		fmt.Println("获取失败。。")
+	//stpt3：查询数据库
+	if err := db.QueryRow("show master status").Scan(&info.File, &info.Position, &info.Binlog_Do_DB, &info.Binlog_Ignore_DB, &info.Executed_Gtid_Set); err != nil {
+		fmt.Println("获取 Master 状态失败。。")
+		return err
 	}
-	fmt.Printf(`change master to master_host='%s',
+	change_sql = fmt.Sprintf(`change master to master_host='%s',
 		master_user='%s',
 		master_password='%s',
 		master_port=%d,
 		master_log_file='%s',
 		master_log_pos=%d,
 		master_connect_retry=30;
-		`, host, "slave", "123456", 3306, info.File, info.Position)
+		`, master_host, "slave", "123456", 3306, info.File, info.Position)
+
+	fmt.Println(change_sql)
+	slave_host = "10.86.239.205"
+	slave_dsn := mysql.GetDsn(map[string]interface{}{"username": "root", "password": "123456", "host": slave_host})
+	slavedb := mysql.DbConnect(slave_dsn)
+
+	slavedb.Exec(change_sql)
+	slavedb.Exec("start slave")
 
 	return nil
 
