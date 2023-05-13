@@ -327,15 +327,20 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 	// 创建service
 	log.Info("start create service")
 	if err := r.Create(ctx, svc); err != nil {
+		if errors.IsAlreadyExists(err) {
+			if err := r.Update(ctx, svc); err != nil {
+				return err
+			}
+		}
 		log.Error(err, "create service error")
-		return err
+		// return err
 	}
 
 	// 创建 headless service
 	headlessService := &k8scorev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: cluster.Namespace,
-			Name:      cluster.Name,
+			Name:      fmt.Sprintf("%s-headless", cluster.Name),
 			Labels:    selector,
 		},
 		Spec: k8scorev1.ServiceSpec{
@@ -362,8 +367,13 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 
 	log.Info("start create headlessService")
 	if err := r.Create(ctx, headlessService); err != nil {
+		if errors.IsAlreadyExists(err) {
+			if err := r.Update(ctx, headlessService); err != nil {
+				return err
+			}
+		}
 		log.Error(err, "create headlessService error")
-		return err
+		// return err
 	}
 
 	Pods, err := r.getPods(ctx, cluster)
@@ -408,8 +418,13 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 
 		log.Info("start create Pod Service")
 		if err := r.Create(ctx, pod_svc); err != nil {
+			if errors.IsAlreadyExists(err) {
+				if err := r.Update(ctx, pod_svc); err != nil {
+					return err
+				}
+			}
 			log.Error(err, "create pod_svc error")
-			return err
+			// return err
 		}
 	}
 
