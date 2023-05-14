@@ -140,7 +140,7 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	// 更新crd状态
 	defer func() {
-		err = r.updateStatus(ctx, cluster)
+		err = r.updateStatus(ctx, cluster, statefulset)
 		if err != nil {
 			log.Error(err, "failed to update cluster status", "replset")
 		}
@@ -157,31 +157,33 @@ func (r *MysqlClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *MysqlClusterReconciler) updateStatus(ctx context.Context, cluster *batchv1.MysqlCluster) error {
+func (r *MysqlClusterReconciler) updateStatus(ctx context.Context, cluster *batchv1.MysqlCluster, sts *apps.StatefulSet) error {
 	log := log.FromContext(ctx)
 	log.Info("update mysqlcluster state")
+
 	// 检查容器ready数量与副本数是否一致
-	Pods, err := r.getPods(ctx, cluster)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-	fmt.Println(len(Pods.Items))
-	var i int
-	for _, pod := range Pods.Items {
-		if pod.Status.ContainerStatuses[0].Ready {
-			fmt.Println(pod.Status.ContainerStatuses)
-			i++
-		}
-	}
-	if i != int(*cluster.Spec.Replicas) {
-		return nil
-	}
+	// Pods, err := r.getPods(ctx, cluster)
+	// if err != nil && !errors.IsNotFound(err) {
+	// 	return err
+	// }
+	// fmt.Println(len(Pods.Items))
+	// var i int
+	// for _, pod := range Pods.Items {
+	// 	if pod.Status.ContainerStatuses[0].Ready {
+	// 		fmt.Println(pod.ObjectMeta.Name)
+	// 		i++
+	// 	}
+	// }
+	// if int(sts.Status.ReadyReplicas) != int(*cluster.Spec.Replicas) {
+	// 	err := myerr.New("Pod Ready less than replica")
+	// 	return err
+	// }
 	cluster.Status.Replica = *cluster.Spec.Replicas
 	time_now := time.Now().Nanosecond()
 	fmt.Println(int32(time_now))
 	cluster.Status.LastScheduleTime = int32(time_now)
 	// 必须使用 r.Status().Update() 更新，否则不会展示 Status 字段
-	err = r.Status().Update(ctx, cluster)
+	err := r.Status().Update(ctx, cluster)
 
 	if err != nil {
 		r.Recorder.Event(cluster, k8scorev1.EventTypeWarning, "FailedUpdateStatus", err.Error())
