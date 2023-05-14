@@ -80,6 +80,9 @@ type BinLogInfo struct {
 //+kubebuilder:rbac:groups=batch.alongparty.cn,resources=mysqlclusters/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=batch.alongparty.cn,resources=mysqlclusters/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=statefulsets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=replicasets,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=configmaps,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=apps,resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=apps,resources=pod,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
@@ -438,10 +441,10 @@ func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *
 	var info BinLogInfo
 	var node NodeInfo
 	var master_host, change_sql, slave_host string
-	// master_host = fmt.Sprintf("%s-0", cluster.Name)
-	master_host = "10.86.239.234"
+	master_host = fmt.Sprintf("%s-0", cluster.Name)
+	// master_host = "10.254.139.163"
 	dsn := mysql.GetDsn(map[string]interface{}{"user_name": "root", "password": "123456", "host": master_host})
-	db := mysql.DbConnect(dsn)
+	db := mysql.DbConnect(dsn, false)
 
 	// 创建同步用户
 	err := db.QueryRow("SELECT user,host FROM mysql.user WHERE user='slave'").Scan(&node.user, &node.host)
@@ -472,9 +475,10 @@ func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *
 		`, master_host, "slave", "123456", 3306, info.File, info.Position)
 
 	fmt.Println(change_sql)
-	slave_host = "10.86.239.205"
+	slave_host = fmt.Sprintf("%s-1", cluster.Name)
+	// slave_host = "10.254.68.211"
 	slave_dsn := mysql.GetDsn(map[string]interface{}{"username": "root", "password": "123456", "host": slave_host})
-	slavedb := mysql.DbConnect(slave_dsn)
+	slavedb := mysql.DbConnect(slave_dsn, false)
 
 	slavedb.Exec(change_sql)
 	slavedb.Exec("start slave")
