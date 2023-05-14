@@ -122,27 +122,29 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(cluster, k8scorev1.EventTypeNormal, "Created", fmt.Sprintf("Created StatefulSet %s/%s", req.Namespace, cluster.Name))
-
-			log.Info("update mysqlcluster state")
-			fmt.Println(*cluster.Spec.Replicas)
-			cluster.Status.Replica = *cluster.Spec.Replicas
-			time_now := time.Now().Nanosecond()
-			fmt.Println(int32(time_now))
-			cluster.Status.LastScheduleTime = int32(time_now)
-			// 必须使用 r.Status().Update() 更新，否则不会展示 Status 字段
-			err = r.Status().Update(ctx, cluster)
-
-			if err != nil {
-				r.Recorder.Event(cluster, k8scorev1.EventTypeWarning, "FailedUpdateStatus", err.Error())
-				return ctrl.Result{}, err
-			}
-
 		}
 		return ctrl.Result{}, err
 	}
 
+	// 创建svc
+	err = r.doReconcileService(ctx, cluster)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	// TODO(user): 初始化 MySQL 主从集群
-	_ = r.InitMysqlCluster(ctx, cluster)
+	err = r.InitMysqlCluster(ctx, cluster)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	// 更新crd状态
+	defer func() {
+		err = r.updateStatus(ctx, cluster)
+		if err != nil {
+			log.Error(err, "failed to update cluster status", "replset")
+		}
+	}()
 
 	return ctrl.Result{}, nil
 }
@@ -153,6 +155,39 @@ func (r *MysqlClusterReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&batchv1.MysqlCluster{}).
 		Owns(&apps.ReplicaSet{}).
 		Complete(r)
+}
+
+func (r *MysqlClusterReconciler) updateStatus(ctx context.Context, cluster *batchv1.MysqlCluster) error {
+	log := log.FromContext(ctx)
+	log.Info("update mysqlcluster state")
+	// 检查容器ready数量与副本数是否一致
+	Pods, err := r.getPods(ctx, cluster)
+	if err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	fmt.Println(len(Pods.Items))
+	var i int
+	for _, pod := range Pods.Items {
+		if pod.Status.ContainerStatuses[0].Ready {
+			fmt.Println(pod.Status.ContainerStatuses)
+			i++
+		}
+	}
+	if i != int(*cluster.Spec.Replicas) {
+		return nil
+	}
+	cluster.Status.Replica = *cluster.Spec.Replicas
+	time_now := time.Now().Nanosecond()
+	fmt.Println(int32(time_now))
+	cluster.Status.LastScheduleTime = int32(time_now)
+	// 必须使用 r.Status().Update() 更新，否则不会展示 Status 字段
+	err = r.Status().Update(ctx, cluster)
+
+	if err != nil {
+		r.Recorder.Event(cluster, k8scorev1.EventTypeWarning, "FailedUpdateStatus", err.Error())
+		return err
+	}
+	return nil
 }
 
 func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, cluster *batchv1.MysqlCluster) error {
@@ -282,10 +317,7 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 	if err != nil {
 		return err
 	}
-	err = r.doReconcileService(ctx, cluster)
-	if err != nil {
-		return err
-	}
+
 	return nil
 }
 
@@ -312,7 +344,7 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 				{
 					Name:     "mysql",
 					Port:     3306,
-					Protocol: k8scorev1.ProtocolSCTP,
+					Protocol: k8scorev1.ProtocolTCP,
 				},
 			},
 			Selector: selector,
@@ -332,10 +364,11 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 	if err := r.Create(ctx, svc); err != nil {
 		if errors.IsAlreadyExists(err) {
 			if err := r.Update(ctx, svc); err != nil {
-				return err
+				log.Error(err, "create service error")
+				return nil
 			}
 		}
-		log.Error(err, "create service error")
+
 		// return err
 	}
 
@@ -351,7 +384,7 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 				{
 					Name:     "mysql",
 					Port:     3306,
-					Protocol: k8scorev1.ProtocolSCTP,
+					Protocol: k8scorev1.ProtocolTCP,
 				},
 			},
 			Selector:  selector,
@@ -372,22 +405,12 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 	if err := r.Create(ctx, headlessService); err != nil {
 		if errors.IsAlreadyExists(err) {
 			if err := r.Update(ctx, headlessService); err != nil {
-				return err
+				log.Error(err, "create headlessService error")
+				return nil
 			}
 		}
-		log.Error(err, "create headlessService error")
-		// return err
-	}
 
-	Pods, err := r.getPods(ctx, cluster)
-	if err != nil && !errors.IsNotFound(err) {
-		return err
-	}
-	fmt.Println(len(Pods.Items))
-	for _, pod := range Pods.Items {
-		if pod.Status.ContainerStatuses[0].Ready {
-			fmt.Println(pod.Name)
-		}
+		// return err
 	}
 
 	for i := 0; i < int(*cluster.Spec.Replicas); i++ {
@@ -411,7 +434,7 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 					{
 						Name:     "mysql",
 						Port:     3306,
-						Protocol: k8scorev1.ProtocolSCTP,
+						Protocol: k8scorev1.ProtocolTCP,
 					},
 				},
 				Selector: selector,
@@ -419,16 +442,21 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 			},
 		}
 
+		if err := controllerutil.SetControllerReference(cluster, pod_svc, r.Scheme); err != nil {
+			log.Error(err, "SetControllerReference error")
+			return err
+		}
+
 		log.Info("start create Pod Service")
 		if err := r.Create(ctx, pod_svc); err != nil {
 			if errors.IsAlreadyExists(err) {
 				if err := r.Update(ctx, pod_svc); err != nil {
-					return err
+					log.Error(err, "create or update pod_svc error")
+					return nil
 				}
 			}
-			log.Error(err, "create pod_svc error")
-			// return err
 		}
+
 	}
 
 	log.Info("create service success")
@@ -448,6 +476,9 @@ func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *
 
 	// 创建同步用户
 	err := db.QueryRow("SELECT user,host FROM mysql.user WHERE user='slave'").Scan(&node.user, &node.host)
+	if err != nil {
+		return err
+	}
 	fmt.Println(node.user, node.host)
 	if node.user != "slave" {
 		_, err = db.Exec("CREATE USER 'slave'@'%' IDENTIFIED BY '123456'")

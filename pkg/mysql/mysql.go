@@ -2,7 +2,7 @@
  * @Author: kbsonlong kbsonlong@gmail.com
  * @Date: 2023-05-08 09:34:59
  * @LastEditors: kbsonlong kbsonlong@gmail.com
- * @LastEditTime: 2023-05-13 13:49:32
+ * @LastEditTime: 2023-05-14 23:02:51
  * @FilePath: /pkg/sql/mysql.go
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
@@ -113,3 +113,56 @@ func SocksProxy(dialer proxy.Dialer) Option {
 func NewSocksDialer(addr, user, password string) (proxy.Dialer, error) {
 	return proxy.SOCKS5("tcp", addr, &proxy.Auth{User: user, Password: password}, proxy.Direct)
 }
+
+/**
+ * MySQL连接相关的逻辑
+ */
+
+// type BaseInfo struct {
+// 	RootUserName string
+// 	RootPassword string
+// 	Addr         string
+// 	Port         int
+// 	DBName       string
+// }
+// type Conenctor struct {
+// 	BaseInfo BaseInfo
+// 	DB       *sql.DB
+// }
+
+// func (c *Conenctor) Open() {
+// 	// 读取配置
+// 	// c.loadConfig()
+// 	dataSource := BaseInfo.RootUserName + ":" + c.BaseInfo.RootPassword + "@tcp(" + c.BaseInfo.Addr + ":" + c.BaseInfo.Port + ")/" + c.BaseInfo.DBName
+// 	db, Err := sql.Open("mysql", dataSource)
+// 	if Err != nil {
+// 		common.Error("Fail to opendb dataSource:[%v] Err:[%v]", dataSource, Err.Error())
+// 		return
+// 	}
+// 	db.SetMaxOpenConns(500)
+// 	db.SetMaxIdleConns(200)
+// 	c.DB = db
+// 	Err = db.Ping()
+// 	if Err != nil {
+// 		fmt.Printf("Fail to Ping DB Err :[%v]", Err.Error())
+// 		return
+// 	}
+// }
+
+// // 插入、更新、删除
+// func (c *Conenctor) Exec(ctx context.Context,
+// 	sqlText string,
+// 	params ...interface{}) (qr *QueryResults) {
+// 	qr = &QueryResults{}
+// 	result, err := c.DB.ExecContext(ctx, sqlText, params...)
+// 	defer HandleException()
+// 	if err != nil {
+// 		qr.EffectRow = 0
+// 		qr.Err = err
+// 		common.Error("Fail to exec qurey sqlText:[%v] params:[%v] err:[%v]", sqlText, params, err)
+// 		return
+// 	}
+// 	qr.EffectRow, _ = result.RowsAffected()
+// 	qr.LastInsertId, _ = result.LastInsertId()
+// 	return
+// }
