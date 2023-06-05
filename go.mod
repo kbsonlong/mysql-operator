@@ -85,4 +85,5 @@ require (
 replace (
   github.com/kbsonlong/mysql-operator/pkg/mysql => ./pkg/mysql
   github.com/kbsonlong/mysql-operator/pkg/k8s => ./pkg/k8s
+  github.com/derekparker/delve => github.com/go-delve/delve v1.7.3 // indirect
 )
