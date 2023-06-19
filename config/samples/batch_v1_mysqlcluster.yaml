@@ -11,3 +11,4 @@ metadata:
 spec:
   image: mysql:5.7
   replicas: 2
+  initImage: registry.cn-hangzhou.aliyuncs.com/seam/mysql-operaror-init:v0.0.1

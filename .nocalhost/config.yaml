@@ -1,0 +1,52 @@
+# This is the runtime configuration which stored in K8s cluster. Modifications 
+# to the development configuration will take effect the next time you enter
+# the DevMode, and modification will share with all those who use this cluster.
+#
+# If you want to customized personal configuration, you can create a configuration
+# file named config.yaml in the root directory of your project under the
+# folder .nocalhost (/.nocalhost/config.yaml). It will become part of your 
+# project, you can easily share configuration with other developers, or
+# develop on any other devices using this personal configuration.
+#
+# Tips: You can paste the configuration follow into 
+# /Users/zengshenglong/Code/GoWorkSpace/operators/mysql-operator/.nocalhost/config.yaml
+#
+# In addition, if you want to config multi service in same config.yaml, or use
+# the Server-version of Nocalhost, you can also configure under the definition 
+# of the application, such as:
+# https://nocalhost.dev/docs/config/config-deployment-quickstart
+# 
+  name: "mysql-operator-controller-manager"
+  serviceType: "deployment"
+  containers: 
+    - 
+      name: "manager"
+      hub: null
+      dev: 
+        gitUrl: ""
+        image: "golang:1.19"
+        shell: ""
+        workDir: ""
+        storageClass: ""
+        resources: 
+          requests: 
+            cpu: "0.5"
+            memory: "500Mi"
+          limits: 
+            cpu: "4"
+            memory: "4096Mi"
+        persistentVolumeDirs: []
+        command: 
+          run: 
+            - "go"
+            - "run"
+            - "main.go"
+          debug: 
+            - "./debug.sh"
+        debug: 
+          language: "go"
+          remoteDebugPort: 9009
+        hotReload: true
+        sync: null
+        env: []
+        portForward: []

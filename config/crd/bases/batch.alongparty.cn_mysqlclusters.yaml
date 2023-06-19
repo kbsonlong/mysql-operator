@@ -53,6 +53,8 @@ spec:
             properties:
               image:
                 type: string
+              initImage:
+                type: string
               mysqlVersion:
                 default: "5.7"
                 description: 'Represents the MySQL version that will be run. The available
