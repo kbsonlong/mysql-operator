@@ -72,6 +72,9 @@ spec:
           status:
             description: MysqlClusterStatus defines the observed state of MysqlCluster
             properties:
+              initialized:
+                default: false
+                type: boolean
               lastScheduleTime:
                 description: LastScheduleTime metav1.Time `json:"lastScheduleTime,omitempty"
                   protobuf:"bytes,8,opt,name=lastScheduleTime"`
@@ -81,6 +84,7 @@ spec:
                 format: int32
                 type: integer
             required:
+            - initialized
             - lastScheduleTime
             - replica
             type: object

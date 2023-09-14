@@ -9,6 +9,6 @@ metadata:
     app.kubernetes.io/created-by: mysql-operator
   name: mysqlcluster-sample
 spec:
-  image: mysql:5.7
+  image: mysql:8.0
   replicas: 2
   initImage: registry.cn-hangzhou.aliyuncs.com/seam/mysql-operaror-init:v0.0.1

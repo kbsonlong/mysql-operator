@@ -2,8 +2,8 @@
  * @Author: kbsonlong kbsonlong@gmail.com
  * @Date: 2023-05-06 16:09:35
  * @LastEditors: kbsonlong kbsonlong@gmail.com
- * @LastEditTime: 2023-05-11 13:08:22
- * @FilePath: /mysql-operator/Users/zengshenglong/Code/GoWorkSpace/operators/mysql-operator/api/v1/mysqlcluster_types.go
+ * @LastEditTime: 2023-09-14 18:38:16
+ * @FilePath: /Users/zengshenglong/Code/GoWorkSpace/operators/mysql-operator/api/v1/mysqlcluster_types.go
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
 /*
@@ -61,6 +61,9 @@ type MysqlClusterStatus struct {
 	Replica int32 `json:"replica"`
 	// LastScheduleTime metav1.Time `json:"lastScheduleTime,omitempty" protobuf:"bytes,8,opt,name=lastScheduleTime"`
 	LastScheduleTime int32 `json:"lastScheduleTime"`
+
+	// +kubebuilder:default=false
+	Initialized bool `json:"initialized"`
 }
 
 // +kubebuilder:object:root=true

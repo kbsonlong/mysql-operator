@@ -123,6 +123,7 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				return ctrl.Result{}, err
 			}
 			r.Recorder.Event(cluster, k8scorev1.EventTypeNormal, "Created", fmt.Sprintf("Created StatefulSet %s/%s", req.Namespace, cluster.Name))
+			// return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
@@ -133,12 +134,33 @@ func (r *MysqlClusterReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		return ctrl.Result{}, err
 	}
 
-	// TODO(user): 初始化 MySQL 主从集群
-	err = r.InitMysqlCluster(ctx, cluster)
-	if err != nil {
+	// 检查容器ready数量与副本数是否一致
+	Pods, err := r.getPods(ctx, cluster)
+	if err != nil && !errors.IsNotFound(err) {
 		return ctrl.Result{}, err
 	}
+	fmt.Println(len(Pods.Items))
+	var i int
+	for _, pod := range Pods.Items {
+		if pod.Status.ContainerStatuses[0].Ready {
+			fmt.Println(pod.ObjectMeta.Name)
+			i++
+		}
+	}
+	if i != int(*cluster.Spec.Replicas) {
+		fmt.Println("Pod Ready less than replica")
+		return ctrl.Result{}, nil
+	}
 
+	// TODO(user): 初始化 MySQL 主从集群
+	fmt.Println("###################################")
+	fmt.Println("Starting Initializing Mysql Cluster")
+	if !cluster.Status.Initialized {
+		err = r.InitMysqlCluster(ctx, cluster)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
 	// 更新crd状态
 	defer func() {
 		err = r.updateStatus(ctx, cluster, statefulset)
@@ -162,27 +184,11 @@ func (r *MysqlClusterReconciler) updateStatus(ctx context.Context, cluster *batc
 	log := log.FromContext(ctx)
 	log.Info("update mysqlcluster state")
 
-	// 检查容器ready数量与副本数是否一致
-	// Pods, err := r.getPods(ctx, cluster)
-	// if err != nil && !errors.IsNotFound(err) {
-	// 	return err
-	// }
-	// fmt.Println(len(Pods.Items))
-	// var i int
-	// for _, pod := range Pods.Items {
-	// 	if pod.Status.ContainerStatuses[0].Ready {
-	// 		fmt.Println(pod.ObjectMeta.Name)
-	// 		i++
-	// 	}
-	// }
-	// if int(sts.Status.ReadyReplicas) != int(*cluster.Spec.Replicas) {
-	// 	err := myerr.New("Pod Ready less than replica")
-	// 	return err
-	// }
 	cluster.Status.Replica = *cluster.Spec.Replicas
 	time_now := time.Now().Nanosecond()
 	fmt.Println(int32(time_now))
 	cluster.Status.LastScheduleTime = int32(time_now)
+	cluster.Status.Initialized = true
 	// 必须使用 r.Status().Update() 更新，否则不会展示 Status 字段
 	err := r.Status().Update(ctx, cluster)
 
@@ -190,7 +196,7 @@ func (r *MysqlClusterReconciler) updateStatus(ctx context.Context, cluster *batc
 		r.Recorder.Event(cluster, k8scorev1.EventTypeWarning, "FailedUpdateStatus", err.Error())
 		return err
 	}
-	return nil
+	return err
 }
 
 func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, cluster *batchv1.MysqlCluster) error {
@@ -210,14 +216,6 @@ func (r *MysqlClusterReconciler) doReconcileStatefulSet(ctx context.Context, clu
 		ensureVolume("dynamic", k8scorev1.VolumeSource{
 			EmptyDir: &k8scorev1.EmptyDirVolumeSource{},
 		}),
-		// ensureVolume("initdb", k8scorev1.VolumeSource{
-		// 	ConfigMap: &k8scorev1.ConfigMapVolumeSource{
-		// 		LocalObjectReference: k8scorev1.LocalObjectReference{
-		// 			Name: fmt.Sprintf("%s-initdb", cluster.Name),
-		// 		},
-		// 		DefaultMode: &fileMode,
-		// 	},
-		// }),
 	}
 
 	containers := []k8scorev1.Container{
@@ -368,7 +366,7 @@ func (r *MysqlClusterReconciler) doReconcileService(ctx context.Context, cluster
 		if errors.IsAlreadyExists(err) {
 			if err := r.Update(ctx, svc); err != nil {
 				log.Error(err, "create service error")
-				return nil
+				return err
 			}
 		}
 
@@ -472,19 +470,17 @@ func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *
 	var info BinLogInfo
 	var node NodeInfo
 	var master_host, change_sql, slave_host string
-	master_host = fmt.Sprintf("%s-0", cluster.Name)
-	// master_host = "10.254.139.163"
+	master_host = fmt.Sprintf("%s-0.%s", cluster.Name, cluster.Namespace)
+	fmt.Println(master_host)
 	dsn := mysql.GetDsn(map[string]interface{}{"user_name": "root", "password": "123456", "host": master_host})
 	db := mysql.DbConnect(dsn, false)
 
 	// 创建同步用户
-	err := db.QueryRow("SELECT user,host FROM mysql.user WHERE user='slave'").Scan(&node.user, &node.host)
-	if err != nil {
-		return err
-	}
+	db.QueryRow("SELECT user,host FROM mysql.user WHERE user='slave'").Scan(&node.user, &node.host)
+
 	fmt.Println(node.user, node.host)
 	if node.user != "slave" {
-		_, err = db.Exec("CREATE USER 'slave'@'%' IDENTIFIED BY '123456'")
+		_, err := db.Exec("CREATE USER 'slave'@'%' IDENTIFIED WITH 'mysql_native_password' BY '123456' ")
 		if err != nil {
 			return err
 		}
@@ -509,13 +505,20 @@ func (r *MysqlClusterReconciler) InitMysqlCluster(ctx context.Context, cluster *
 		`, master_host, "slave", "123456", 3306, info.File, info.Position)
 
 	fmt.Println(change_sql)
-	slave_host = fmt.Sprintf("%s-1", cluster.Name)
-	// slave_host = "10.254.68.211"
+	slave_host = fmt.Sprintf("%s-1.%s", cluster.Name, cluster.Namespace)
 	slave_dsn := mysql.GetDsn(map[string]interface{}{"username": "root", "password": "123456", "host": slave_host})
 	slavedb := mysql.DbConnect(slave_dsn, false)
 
 	slavedb.Exec(change_sql)
-	slavedb.Exec("start slave")
+	_, err := slavedb.Exec(change_sql)
+	if err != nil {
+		return err
+	}
+
+	_, err = slavedb.Exec("start slave")
+	if err != nil {
+		return err
+	}
 
 	return nil
 

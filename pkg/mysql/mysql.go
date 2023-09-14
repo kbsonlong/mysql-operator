@@ -2,8 +2,8 @@
  * @Author: kbsonlong kbsonlong@gmail.com
  * @Date: 2023-05-08 09:34:59
  * @LastEditors: kbsonlong kbsonlong@gmail.com
- * @LastEditTime: 2023-06-05 15:13:13
- * @FilePath: /pkg/sql/mysql.go
+ * @LastEditTime: 2023-09-14 17:33:13
+ * @FilePath: /Users/zengshenglong/Code/GoWorkSpace/operators/mysql-operator/pkg/mysql/mysql.go
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
  */
 
@@ -77,6 +77,7 @@ func DbConnect(dsn string, isproxy bool) *sql.DB {
 		if err != nil {
 			panic("db连接发生错误")
 		}
+		fmt.Println("链接成功")
 		return db
 	}
 }
